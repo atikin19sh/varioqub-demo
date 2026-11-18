@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useExperimentsContext, useFlagContext } from 'yandex-metrica-ab-react';
 import { sendGoal } from './metrica';
 
-const FLAG = 'payment_personal_consent';
+const FLAG = 'payment_consent';
 const TAKE_FIRST_FEATURE_FLAG = true as const;
 const FLAG_TIMEOUT_MS = 5000; // Учебная настройка, не требование к рабочей оплате.
 type Variant = 'A' | 'B';
-type FeatureFlagsMap = { payment_personal_consent: Variant };
+type FeatureFlagsMap = { payment_consent: Variant };
 type Resolution =
   | { kind: 'loading' }
   | { kind: 'assigned'; variant: Variant }
