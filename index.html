@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Проверка Varioqub</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px 20px; background: #f3f5f8; color: #182538; font: 16px/1.55 system-ui, sans-serif; }
+    main { max-width: 760px; margin: auto; }
+    section { background: white; border: 1px solid #dce2ea; border-radius: 16px; padding: 24px; margin: 20px 0; }
+    h1 { margin-bottom: 8px; font-size: 28px; }
+    h2 { margin-top: 0; font-size: 19px; }
+    p { margin: 8px 0 16px; }
+    label { display: flex; gap: 12px; align-items: flex-start; margin: 20px 0; }
+    input { width: 20px; height: 20px; margin-top: 3px; flex-shrink: 0; }
+    button { border: 0; border-radius: 8px; padding: 12px 18px; background: #275dc8; color: white; font: inherit; cursor: pointer; }
+    button:disabled { background: #d5dce6; color: #526176; cursor: not-allowed; }
+    code { font-size: 14px; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f3f5f8; padding: 14px; border-radius: 8px; font-size: 12px; }
+    .muted { color: #536278; font-size: 14px; }
+    #variant { font-weight: 650; }
+    #result { min-height: 24px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Проверка Varioqub</h1>
+  <p class="muted">Учебный пример. Здесь нет настоящей оплаты или сохранения согласий.</p>
+  <section>
+    <h2>Подключение</h2>
+    <p id="connection" role="status">Проверяем настройки…</p>
+    <p>Вариант: <span id="variant">ожидание</span></p>
+    <details><summary>Ответ с флагами</summary><pre id="flags">Ещё не получен.</pre></details>
+  </section>
+  <section>
+    <h2>Тестовая форма</h2>
+    <p id="hint">Ожидается ответ Varioqub.</p>
+    <form id="form">
+      <label><input id="consent" type="checkbox" disabled><span>Тестовый чекбокс согласия</span></label>
+      <button id="submit" type="submit" disabled>Оплатить (имитация)</button>
+    </form>
+    <p id="result" role="status"></p>
+  </section>
+  <section>
+    <h2>Вызовы Метрики</h2>
+    <p class="muted">Журнал показывает вызовы из страницы. Получение событий проверяется отдельно в отладчике Метрики и отчётах.</p>
+    <pre id="events">Пока нет событий.</pre>
+  </section>
+</main>
+<script>
+  // Заменить 0 номером ЛИЧНОГО тестового счётчика. Токены доступа не нужны.
+  const COUNTER_ID = 0;
+  const FLAG = 'payment_personal_consent';
+  const EXPERIMENT_ID = 'personal-consent-demo';
+  // Учебная настройка, не требование к рабочей форме оплаты.
+  const FLAG_TIMEOUT_MS = 5000;
+
+  const connection = document.getElementById('connection');
+  const variantLabel = document.getElementById('variant');
+  const flagsOutput = document.getElementById('flags');
+  const hint = document.getElementById('hint');
+  const consent = document.getElementById('consent');
+  const submit = document.getElementById('submit');
+  const result = document.getElementById('result');
+  const events = document.getElementById('events');
+  let variant = null;
+  let settled = false;
+  let timeout;
+  let eventSequence = 0;
+  const pageId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  function logEvent(target, details) {
+    if (!variant) return;
+    const params = {
+      experiment_id: EXPERIMENT_ID,
+      variant,
+      event_at: new Date().toISOString(),
+      event_id: `${pageId}-${++eventSequence}`,
+      ...details
+    };
+    window.ym(COUNTER_ID, 'reachGoal', target, params);
+    if (eventSequence === 1) events.textContent = '';
+    events.textContent += JSON.stringify({ target, params }, null, 2) + '\n\n';
+  }
+
+  function updateButton() {
+    submit.disabled = consent.disabled || (consent.required && !consent.checked);
+  }
+
+  function fallback(reason) {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    connection.textContent = reason;
+    variantLabel.textContent = 'вне эксперимента';
+    hint.textContent = 'Учебный резервный режим: отметка обязательна, события A/B не отправляются.';
+    consent.disabled = false;
+    consent.required = true;
+    updateButton();
+  }
+
+  function applyFlags(flags) {
+    flagsOutput.textContent = JSON.stringify(flags, null, 2);
+    if (settled) return; // Поздний ответ не меняет уже показанное поведение.
+    const values = flags && flags[FLAG];
+    // В этом стенде один эксперимент с одним значением данного флага.
+    if (!Array.isArray(values) || values.length !== 1 || !['A', 'B'].includes(values[0])) {
+      fallback('Ожидается ровно одно значение A или B. Проверьте флаг и условия эксперимента.');
+      return;
+    }
+    settled = true;
+    clearTimeout(timeout);
+    variant = values[0];
+    connection.textContent = 'Флаг Varioqub получен и применён.';
+    variantLabel.textContent = variant;
+    consent.disabled = false;
+    consent.required = variant === 'B';
+    hint.textContent = variant === 'A'
+      ? 'A: можно продолжить без отметки.'
+      : 'B: для продолжения необходимо поставить отметку.';
+    updateButton();
+    const recordView = () => {
+      if (document.visibilityState === 'hidden') return;
+      document.removeEventListener('visibilitychange', recordView);
+      requestAnimationFrame(() => logEvent('ab_payment_consent_view', {
+        personal_visible: 1,
+        personal_required: Number(consent.required)
+      }));
+    };
+    document.addEventListener('visibilitychange', recordView);
+    recordView();
+  }
+
+  consent.addEventListener('change', () => {
+    updateButton();
+    result.textContent = '';
+    logEvent('ab_payment_consent_change', { personal_checked: Number(consent.checked) });
+  });
+
+  document.getElementById('form').addEventListener('submit', event => {
+    event.preventDefault();
+    if (submit.disabled || (consent.required && !consent.checked)) return;
+    logEvent('ab_payment_submit', { personal_checked: Number(consent.checked) });
+    result.textContent = variant
+      ? 'Вызвано событие попытки оплаты. Настоящий платёж не выполнялся.'
+      : 'Форма прошла проверку в резервном режиме. Событие A/B не отправлено.';
+  });
+
+  function installQueue(name) {
+    window[name] = window[name] || function () {
+      (window[name].a = window[name].a || []).push(arguments);
+    };
+  }
+
+  function loadScript(src, onerror) {
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = src;
+    script.onerror = onerror;
+    document.head.appendChild(script);
+  }
+
+  if (!Number.isSafeInteger(COUNTER_ID) || COUNTER_ID <= 0) {
+    connection.textContent = 'Укажите номер личного счётчика в COUNTER_ID внутри index.html и обновите страницу.';
+    hint.textContent = 'До настройки счётчика форма отключена.';
+  } else {
+    installQueue('ym');
+    window.ym.l = Date.now();
+    window.ym(COUNTER_ID, 'init', { webvisor: false, clickmap: false, trackLinks: false });
+    loadScript('https://mc.yandex.ru/metrika/tag.js', () => {
+      events.textContent += '\nНе удалось загрузить Метрику. Проверьте сеть и блокировщики.\n';
+    });
+    installQueue('ymab');
+    connection.textContent = 'Ожидается флаг Varioqub…';
+    timeout = setTimeout(() => fallback('Varioqub не ответил за 5 секунд.'), FLAG_TIMEOUT_MS);
+    // getFlags самостоятельно вызывает init — отдельный вызов init не нужен.
+    window.ymab(`metrika.${COUNTER_ID}`, 'getFlags', applyFlags);
+    loadScript('https://abt.s3.yandex.net/expjs/latest/exp.js', () => {
+      fallback('Не удалось загрузить Varioqub.');
+    });
+  }
+</script>
+</body>
+</html>
